@@ -19,6 +19,10 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL?.includes("localhost") ? false : { rejectUnauthorized: false }
 });
 
+// A dropped idle connection would otherwise crash the whole process (Node
+// treats an unhandled pool 'error' as fatal).
+pool.on("error", (err) => console.error("Unexpected pg pool error", err));
+
 function normalize(str) {
   return (str || "")
     .toLowerCase()
@@ -138,12 +142,23 @@ app.get("/", (_req, res) => {
   res.json({ status: "ok", message: "Employee Search realtime backend running" });
 });
 
-app.get("/employees", async (_req, res) => {
+function asyncRoute(handler) {
+  return (req, res) => {
+    handler(req, res).catch((err) => {
+      console.error(err);
+      res.status(500).json({ error: "Internal error" });
+    });
+  };
+}
+
+const REQUIRED_FIELDS = ["full_name", "job_title", "department", "email"];
+
+app.get("/employees", asyncRoute(async (_req, res) => {
   const { rows } = await pool.query("SELECT * FROM employees ORDER BY full_name");
   res.json(rows.map(rowToEmployee));
-});
+}));
 
-app.get("/employees/search", async (req, res) => {
+app.get("/employees/search", asyncRoute(async (req, res) => {
   const q = normalize(req.query.q || "");
   if (!q) return res.json([]);
   const { rows } = await pool.query("SELECT * FROM employees");
@@ -157,24 +172,33 @@ app.get("/employees/search", async (req, res) => {
       normalize(e.legajo).includes(q)
     );
   res.json(results);
-});
+}));
 
-app.get("/employees/:id", async (req, res) => {
+app.get("/employees/:id", asyncRoute(async (req, res) => {
   const { rows } = await pool.query("SELECT * FROM employees WHERE id = $1", [req.params.id]);
   if (rows.length === 0) return res.status(404).json({ error: "Employee not found" });
   res.json(rowToEmployee(rows[0]));
-});
+}));
 
-app.put("/employees/:id", async (req, res) => {
+app.put("/employees/:id", asyncRoute(async (req, res) => {
+  const missing = REQUIRED_FIELDS.filter((field) => !req.body?.[field]);
+  if (missing.length > 0) {
+    return res.status(400).json({ error: `Missing required fields: ${missing.join(", ")}` });
+  }
   const employee = await upsertEmployee({ ...req.body, id: req.params.id });
   broadcast({ type: "upsert", employee });
   res.json(employee);
-});
+}));
 
-app.delete("/employees/:id", async (req, res) => {
+app.delete("/employees/:id", asyncRoute(async (req, res) => {
   await pool.query("DELETE FROM employees WHERE id = $1", [req.params.id]);
   broadcast({ type: "delete", id: req.params.id });
   res.status(204).send();
+}));
+
+app.use((err, _req, res, _next) => {
+  console.error(err);
+  res.status(500).json({ error: "Internal error" });
 });
 
 const server = http.createServer(app);
