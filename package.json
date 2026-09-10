@@ -1,0 +1,15 @@
+{
+  "name": "employee-search-backend",
+  "version": "1.0.0",
+  "description": "Real-time shared backend for the Employee Search app -- REST + WebSocket, backed by Postgres.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "pg": "^8.13.1",
+    "ws": "^8.18.0"
+  }
+}
