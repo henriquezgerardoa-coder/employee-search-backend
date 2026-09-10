@@ -207,7 +207,11 @@ const clients = new Set();
 
 server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const key = req.headers["x-api-key"] || url.searchParams.get("api_key");
+  // Node joins repeated headers with a comma -- tolerate a client that
+  // (accidentally or otherwise) sends x-api-key more than once.
+  const rawKey = req.headers["x-api-key"];
+  const keys = Array.isArray(rawKey) ? rawKey : (rawKey || "").split(",");
+  const key = keys.includes(API_KEY) ? API_KEY : (url.searchParams.get("api_key") || "");
   if (url.pathname !== "/ws" || key !== API_KEY) {
     socket.destroy();
     return;
